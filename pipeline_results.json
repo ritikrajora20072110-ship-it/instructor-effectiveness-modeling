@@ -1,0 +1,60 @@
+{
+  "num_instructors": 120,
+  "num_batches": 2000,
+  "tier_thresholds": {
+    "Q25": 0.4136137008044545,
+    "Q75": 0.581399316866827
+  },
+  "tier_distribution": {
+    "Medium": 60,
+    "High": 30,
+    "Low": 30
+  },
+  "top_5_features_rf": {
+    "completion_rate_mean": 0.25689943528415715,
+    "dropout_rate_mean": 0.1930653092475152,
+    "avg_score_improvement_mean": 0.10088641547918695,
+    "feedback_response_rate_mean": 0.09819154683692963,
+    "avg_feedback_score_mean": 0.08960694826461392
+  },
+  "top_5_features_perm": {
+    "completion_rate_mean": 0.033333333333333326,
+    "avg_score_improvement_mean": 0.017777777777777774,
+    "feedback_response_rate_mean": 0.011111111111111108,
+    "dropout_rate_mean": 0.008888888888888887,
+    "forum_activity_rate_mean": 0.008888888888888887
+  },
+  "test_classification_report_rf": {
+    "Low": {
+      "precision": 0.8888888888888888,
+      "recall": 1.0,
+      "f1-score": 0.9411764705882353,
+      "support": 8.0
+    },
+    "Medium": {
+      "precision": 1.0,
+      "recall": 0.9333333333333333,
+      "f1-score": 0.9655172413793104,
+      "support": 15.0
+    },
+    "High": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 7.0
+    },
+    "accuracy": 0.9666666666666667,
+    "macro avg": {
+      "precision": 0.9629629629629629,
+      "recall": 0.9777777777777779,
+      "f1-score": 0.9688979039891819,
+      "support": 30.0
+    },
+    "weighted avg": {
+      "precision": 0.9703703703703703,
+      "recall": 0.9666666666666667,
+      "f1-score": 0.9670723461798513,
+      "support": 30.0
+    }
+  }
+}
