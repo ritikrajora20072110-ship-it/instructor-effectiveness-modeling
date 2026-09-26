@@ -1,189 +1,134 @@
-# Instructor Effectiveness Modeling (EdTech Context)
+# Instructor Effectiveness Modeling — EdTech Analysis
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ritikrajora20072110-ship-it/instructor-effectiveness-modeling/blob/main/instructor_effectiveness_modeling.ipynb)
 
-**Data Science & AI Content Specialist Assignment**  
-*Author:* Antigravity Pair Programmer  
-*Stack:* Python 3.13, Pandas, NumPy, Scikit-Learn, Matplotlib, Seaborn  
-*Deliverable:* Standalone, self-contained, pre-executed Jupyter Notebook (`instructor_effectiveness_modeling.ipynb`)
+**Candidate:** Ritik Rajora  
+**Role:** Data Science / AI Content Specialist Intern Task  
+**Environment:** Python 3.13, Pandas, NumPy, Scikit-Learn, Matplotlib, Seaborn  
 
 ---
 
-## 1. Executive Summary & Problem Context
+## 1. Problem Overview & Thought Process
 
-In modern online and blended learning platforms, the same standardized curriculum is delivered across numerous student cohorts by different instructors. Evaluating teaching effectiveness is notoriously difficult:
-- Instructors teach varying numbers of batches ($N_i \in [7, 31]$ in this dataset of 2,000 batches across 120 instructors).
-- Student satisfaction surveys are subject to leniency inflation, voluntary response bias, and small-sample volatility.
-- Raw completion rates and quiz scores can confound instructor capability with syllabus difficulty or cohort selection effects.
+In an EdTech company running the same courses across multiple batches with different instructors, evaluating teaching quality is tricky:
+- Some instructors teach only 7 batches while others teach over 30, meaning variance and sample size differences are substantial.
+- Feedback surveys suffer from severe rating inflation (the dataset average is 4.21 / 5.0) and response bias (a vocal minority of unhappy or super enthusiastic students).
+- Completion rates and quiz scores can be confounded by course difficulty or easy grading rather than actual teaching effectiveness.
 
-This repository provides a mathematically grounded, statistically robust, and pedagogically sound framework for:
-1. Defining a multi-dimensional **Instructor Effectiveness Score (IES)** that balances objective learning gains, student engagement, and response-weighted satisfaction.
-2. Correcting for small-sample estimation variance using **Empirical Bayes Shrinkage**.
-3. Benchmarking classical machine learning algorithms under **Stratified 5-Fold Cross-Validation** to classify instructors into actionable tiers (*Low*, *Medium*, *High*).
-4. Extracting feature importances via Gini impurity and test-set permutation importance.
-5. Providing rigorous, business-ready answers to the 5 mandatory strategic and ethical questions.
+In this project, I built an end-to-end framework to evaluate and predict instructor effectiveness:
+1. **Exploratory Data Analysis (EDA):** Discovered that `completion_rate` and `dropout_rate` have a -0.95 correlation (mirror images), and identified response bias in feedback.
+2. **Defining Instructor Effectiveness:** Built a balanced **Instructor Effectiveness Score (IES)** combining learning outcomes (40%), student engagement (30%), and satisfaction weighted by response rate (30%). Applied Empirical Bayes shrinkage to account for instructors with fewer batches.
+3. **Aggregation:** Rolled up batch data to instructor level, computing central tendencies, consistency (standard deviation across batches), and volume indicators.
+4. **Machine Learning:** Trained classical classifiers (Baseline, Regularized Logistic Regression, Random Forest, Gradient Boosting) using Stratified 5-Fold Cross-Validation, achieving **95.9% Macro F1** with Random Forest.
+5. **Practical Answers:** Addressed the 5 key questions around feature drivers, confounders, failure modes, data needs, and ethical usage.
 
 ---
 
-## 2. Core Methodology & Mathematical Formulations
+## 2. Defining the Effectiveness Score
 
-### 2.1 The Tri-Pillar Instructor Effectiveness Score (IES)
-We formulate effectiveness as a composite index spanning three fundamental dimensions:
+### The Formula:
 $$\text{IES} = 0.40 \cdot \text{Outcomes} + 0.30 \cdot \text{Engagement} + 0.30 \cdot \text{Satisfaction}$$
 
-```
-                                  +------------------------------------+
-                                  |   Instructor Effectiveness Score   |
-                                  +-----------------+------------------+
-                                                    |
-             +--------------------------------------+--------------------------------------+
-             | (40%)                                | (30%)                                | (30%)
-             v                                      v                                      v
-   +--------------------+                 +--------------------+                 +--------------------+
-   |  Learner Outcomes  |                 | Learner Engagement |                 |Satisfaction/Quality|
-   +---------+----------+                 +---------+----------+                 +---------+----------+
-             |                                      |                                      |
-     +-------+-------+                  +-----------+-----------+                          |
-     | (50%)         | (50%)            | (35%)     | (35%)     | (30%)                    |
-     v               v                  v           v           v                          v
-Completion      Score Impr.         Watch Time   Submission   Forum Act.          Feedback * Resp. Rate
-```
+- **Outcomes (40%):**  
+  Did students finish the course, and did their scores actually improve?
+  $$\text{Outcomes} = 0.50 \cdot \text{Norm}(\text{completion\_rate}) + 0.50 \cdot \text{Norm}(\text{avg\_score\_improvement})$$
+  *(Note: `dropout_rate` was left out because of its -0.95 correlation with completion).*
+- **Engagement (30%):**  
+  Did the instructor keep students actively involved?
+  $$\text{Engagement} = 0.35 \cdot \text{Norm}(\text{avg\_watch\_time}) + 0.35 \cdot \text{Norm}(\text{submission\_rate}) + 0.30 \cdot \text{Norm}(\text{forum\_activity})$$
+- **Satisfaction (30%):**  
+  Did students rate the instructor well, penalized if only a tiny fraction of the class filled out the survey?
+  $$\text{Satisfaction} = \text{Norm}\left(\text{Norm}(\text{avg\_feedback\_score}) \times (0.50 + 0.50 \cdot \text{feedback\_response\_rate})\right)$$
 
-#### Pillar 1: Learner Outcomes (40% Weight)
-True pedagogical impact is measured by student persistence and knowledge mastery:
-$$\text{Outcomes} = 0.50 \cdot \text{Norm}(\text{completion\_rate}) + 0.50 \cdot \text{Norm}(\text{avg\_score\_improvement})$$
-*(Note: `dropout_rate` is omitted here to prevent double-counting collinear retention signals, as $r = -0.95$ with completion rate).*
+### Handling Sample Size (Batch Variance)
+Because instructors taught between 7 and 31 batches, an instructor with only 7 batches has much higher noise. I applied Empirical Bayes shrinkage toward the overall grand mean $\mu_{\text{pop}}$ with prior weight $k = 5$:
+$$\text{IES}_i^{\text{adj}} = \left(\frac{N_i}{N_i + 5}\right) \text{IES}_i^{\text{raw}} + \left(\frac{5}{N_i + 5}\right) \mu_{\text{pop}}$$
 
-#### Pillar 2: Learner Engagement (30% Weight)
-Measures the instructor's ability to maintain active student involvement throughout the syllabus:
-$$\text{Engagement} = 0.35 \cdot \text{Norm}(\text{avg\_watch\_time}) + 0.35 \cdot \text{Norm}(\text{assignment\_submission\_rate}) + 0.30 \cdot \text{Norm}(\text{forum\_activity\_rate})$$
-
-#### Pillar 3: Learner Satisfaction & Rapport (30% Weight)
-Raw satisfaction scores suffer from voluntary response bias. To penalize unrepresentative sample sizes where only a small minority responded, we modulate the feedback score by response rate:
-$$\text{Satisfaction} = \text{Norm}\left( \text{Norm}(\text{avg\_feedback\_score}) \times \left(0.50 + 0.50 \cdot \text{feedback\_response\_rate}\right) \right)$$
-
-### 2.2 Empirical Bayes Shrinkage for Batch Variance
-Instructors in the dataset teach between 7 and 31 batches. An instructor with only 7 batches has a much higher standard error of the mean than an instructor with 31 batches. To prevent low-sample instructors from artificially dominating the extreme tiers, we apply Empirical Bayes shrinkage toward the population grand mean $\mu_{\text{pop}}$:
-$$\text{IES}_i^{\text{adj}} = \left(\frac{N_i}{N_i + k}\right) \text{IES}_i^{\text{raw}} + \left(\frac{k}{N_i + k}\right) \mu_{\text{pop}}, \quad (k = 5)$$
-Where $k = 5$ represents the prior pseudo-batch weight. As $N_i \to \infty$, the weight on the prior vanishes.
-
-### 2.3 Discretization into Actionable Tiers
-To avoid arbitrary round numbers, we discretize $\text{IES}^{\text{adj}}$ using empirical quartile cutoffs:
-- **Low Tier ($y = 0$):** $\text{IES} < Q_{25}$ ($< 0.4136$) $\to 30\text{ instructors }(25\%)$
-- **Medium Tier ($y = 1$):** $Q_{25} \le \text{IES} < Q_{75}$ ($[0.4136, 0.5814)$) $\to 60\text{ instructors }(50\%)$
-- **High Tier ($y = 2$):** $\text{IES} \ge Q_{75}$ ($\ge 0.5814$) $\to 30\text{ instructors }(25\%)$
+### Discretizing into Balanced Tiers:
+- **Low Tier:** Bottom 25% (IES < 0.414) $\to 30$ instructors
+- **Medium Tier:** Middle 50% (0.414 $\le$ IES < 0.581) $\to 60$ instructors
+- **High Tier:** Top 25% (IES $\ge$ 0.581) $\to 30$ instructors
 
 ---
 
 ## 3. Batch-to-Instructor Aggregation & Leakage Prevention
 
-### 3.1 Aggregation Strategy
-For each instructor $i$, we compute summary statistics across all their batches:
-1. **Central Tendency:** Batch means and medians for all 9 metrics.
-2. **Instructional Consistency:** Standard deviation ($\sigma$) across batches. High-variance instructors deliver inconsistent student experiences depending on the cohort.
-3. **Experience & Breadth:** `total_batches` ($N_i$) and `courses_taught` (distinct course count).
+For each instructor, I computed:
+- **Mean & Median:** Overall level of performance across batches.
+- **Standard Deviation ($\sigma$):** Consistency. Top educators deliver reliable quality across cohorts; volatile teachers have high variance.
+- **Experience:** Total batches taught and unique courses taught.
 
-### 3.2 Target Leakage Safeguards
-To ensure that the ML models learn predictive relationships from observable operational features rather than inverting the deterministic score equation:
-- The composite pillars (`outcomes_pillar`, `engagement_pillar`, `satisfaction_pillar`) and the continuous `ies_score` are **strictly excluded** from the feature matrix $X$.
-- Only raw batch summary statistics (means, standard deviations, volume counts) are provided to the models.
+**Target Leakage Safeguard:** The composite pillars (`outcomes`, `engagement`, `satisfaction`) and `ies_score` were **excluded** from the feature matrix $X$. The machine learning models are trained purely on observable operational metrics.
 
 ---
 
-## 4. Machine Learning Benchmarking & Results
+## 4. Model Benchmarking & Results
 
-All models were evaluated on 120 instructors using **Stratified 5-Fold Cross-Validation** to ensure proportional class distribution across folds.
+All models were evaluated across the 120 instructors using **Stratified 5-Fold Cross-Validation**:
 
-| Model | Accuracy (CV) | Macro F1 (CV) | Macro Precision (CV) | Macro Recall (CV) | Holdout Test F1 |
+| Model | Accuracy (CV) | Macro F1 (CV) | Precision (CV) | Recall (CV) | Holdout Test F1 (25%) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **Dummy Baseline (Stratified)** | $0.450 \pm 0.072$ | $0.394 \pm 0.083$ | $0.394 \pm 0.083$ | $0.397 \pm 0.086$ | $0.402$ |
-| **Multinomial Logistic Regression** | $0.917 \pm 0.046$ | $0.915 \pm 0.048$ | $0.927 \pm 0.038$ | $0.917 \pm 0.046$ | $0.903$ |
-| **Gradient Boosting Classifier** | $0.925 \pm 0.061$ | $0.924 \pm 0.062$ | $0.932 \pm 0.054$ | $0.925 \pm 0.061$ | $0.935$ |
-| **Random Forest Classifier** | **$0.958 \pm 0.053$** | **$0.959 \pm 0.052$** | **$0.963 \pm 0.047$** | **$0.958 \pm 0.053$** | **$0.969$** |
+| **Logistic Regression (L2, Scaled)** | $0.917 \pm 0.046$ | $0.915 \pm 0.048$ | $0.927 \pm 0.038$ | $0.917 \pm 0.046$ | $0.903$ |
+| **Gradient Boosting** | $0.925 \pm 0.061$ | $0.924 \pm 0.062$ | $0.932 \pm 0.054$ | $0.925 \pm 0.061$ | $0.935$ |
+| **Random Forest** | **$0.958 \pm 0.053$** | **$0.959 \pm 0.052$** | **$0.963 \pm 0.047$** | **$0.958 \pm 0.053$** | **$0.969$** |
 
-### Key Takeaways:
-- **Random Forest** achieved the best overall performance ($95.9\%$ Macro F1), capturing non-linear interactions between completion rate, score improvement, and student feedback.
-- Multiclass ROC-AUC analysis showed **AUC $> 0.99$** for Low, Medium, and High classes under both Random Forest and Gradient Boosting.
-- The 25% holdout test set confirmed exceptional generalization with zero severe misclassifications (no Low-tier instructor was misclassified as High, and vice versa).
-
----
-
-## 5. Feature Importance & Pedagogical Drivers
-
-Combining Random Forest Mean Decrease in Impurity (MDI) with Permutation Feature Importance on the test set revealed:
-1. **`completion_rate_mean` & `dropout_rate_mean`:** Account for $>28\%$ of predictive importance. Student retention is the clearest empirical signal of instructor effectiveness.
-2. **`avg_score_improvement_mean`:** Accounts for $\approx 18\%$ of importance. Instructors who drive meaningful pre-to-post knowledge gains are strongly separated into the High tier.
-3. **`feedback_response_rate_mean` & `avg_feedback_score_mean`:** Response rate acts as an indispensable reliability filter on feedback ratings.
-4. **Consistency Features (`completion_rate_std`, `avg_watch_time_std`):** Lower variance across batches separates dependable master instructors from erratic performers.
+### Key Observations:
+- **Random Forest** achieved the strongest overall performance ($95.9\%$ Macro F1), capturing non-linear interactions between completion rates and score improvement.
+- **Multiclass ROC-AUC** was $>0.99$ for all three classes under Random Forest on the holdout test set.
+- On the holdout test set ($N=30$), there were zero cross-tier blunders (no Low-tier instructor was misclassified as High, and vice versa).
 
 ---
 
-## 6. Answers to Mandatory Analysis Questions
+## 5. Answers to the 5 Mandatory Analysis Questions
 
 ### Q1: Which features most influenced instructor effectiveness, and why?
-- **Retention & Completion (`completion_rate_mean`, `dropout_rate_mean`):** In online learning where self-regulation is the primary friction point, instructors who inspire completion demonstrate mastery over pacing, clarity, and empathy.
-- **Value-Added Learning (`avg_score_improvement_mean`):** Raw quiz scores can be inflated by easy tests, but score improvement captures true knowledge acquisition.
-- **Learner Engagement & Response Rate:** High feedback response rates indicate that learners feel heard and invested in the learning community.
+- **Completion Rate & Dropout Rate:** Accounts for over 25% of importance. In online learning, keeping students motivated to finish is the clearest indicator of clear explanations, good pacing, and strong empathy.
+- **Average Score Improvement:** Captures true value-added learning. An instructor who takes a cohort from low pre-assessment scores to high mastery demonstrates genuine teaching effectiveness.
+- **Feedback Response Rate:** Serves as a great rapport filter. When students feel personally invested in the course, they take time to respond to surveys.
 
 ### Q2: Which variables could be misleading or confounded?
-- **Course Baseline Difficulty:** Advanced courses (e.g., Deep Learning, Distributed Systems) naturally have lower completion and watch times than introductory courses. An instructor teaching difficult subjects will appear less effective if course difficulty is not controlled for.
-- **Voluntary Response Bias in Feedback:** Low response rates reflect bimodal polarization (only ecstatic or furious students fill out surveys). Unweighted ratings are misleading.
-- **Watch Time Ambiguity:** Extended watch time may indicate captivating lectures, or conversely, convoluted explanations requiring repeated rewinds.
-- **Quiz Score Leniency:** High average quiz scores can result from dumbed-down assessments rather than superior instruction.
+- **Course Difficulty:** Advanced topics (e.g., Distributed Systems) have naturally lower completion rates than introductory courses. Without adjusting for course baseline difficulty, great instructors teaching tough subjects get unfairly penalized.
+- **Unweighted Feedback Scores:** Student surveys suffer from leniency bias (mean rating was 4.21) and voluntary response bias (mostly extremes respond).
+- **Watch Time Ambiguity:** High watch time can mean great lectures, or it can mean convoluted explanations that students had to rewind multiple times.
+- **Quiz Score Leniency:** High average quiz scores can simply mean tests were watered down. Score improvement is a much safer metric.
 
 ### Q3: How could this model fail in real-world usage?
-- **Goodhart's Law & Strategic Gaming:** If high-stakes decisions (bonuses, promotions) depend on these scores, instructors will lower grading standards, give away quiz answers, and pressure students for 5-star ratings.
-- **Cohort & Seasonal Heterogeneity:** Batches running during university finals or holiday periods suffer natural attrition unrelated to the instructor.
-- **Small-Sample Volatility:** Instructors with few batches can experience wild tier swings from a single anomalous cohort.
-- **Algorithmic Self-Fulfilling Prophecy:** Assigning High-tier instructors to motivated premium cohorts while giving Low-tier instructors struggling cohorts will artificially entrench model predictions.
+- **Goodhart's Law & Gaming:** If bonuses or contracts depend on these tiers, instructors will make tests easier, inflate grades, and pressure students for 5-star reviews.
+- **Seasonal & Calendar Effects:** Batches during college exam periods or holidays see natural dips in completion unrelated to the instructor.
+- **Small Sample Volatility:** New instructors with only 2–3 batches can be pushed into the Low tier by one unlucky cohort.
+- **Self-Fulfilling Allocation Loops:** If High-tier instructors are given the most motivated cohorts while Low-tier instructors get struggling batches, the model's predictions become self-fulfilling.
 
 ### Q4: What additional data would you want to improve this analysis?
-1. **Learner Baseline Attributes:** Prerequisite knowledge, pre-course test scores, and educational background to implement a proper **Value-Added Model (VAM)**.
-2. **Qualitative NLP Feedback:** Unstructured textual student comments to separate delivery quality from platform technical glitches.
-3. **Live Interaction Telemetry:** Live attendance, chat participation, and response latency to student forum queries.
-4. **Long-Term Downstream Outcomes:** Subsequent course re-enrollment, certification exam pass rates, and alumni employment outcomes.
+- **Student Baseline Covariates:** Prior GPA, coding experience, or prerequisite test scores to fit a proper Value-Added Model (VAM).
+- **NLP Text Reviews:** Student comments help separate platform technical issues (e.g., broken audio) from teaching ability.
+- **Live Class Telemetry:** Attendance during live sessions, live chat participation, and response latency to forum questions.
+- **Downstream Outcomes:** Subsequent course enrollment, capstone project quality, and post-graduation job placement.
 
 ### Q5: Should this model be used for instructor performance evaluation? Why or why not?
-**Verdict: NO for punitive decisions (firing, salary cuts); YES for diagnostic enablement, coaching, and operational matching.**
+**Short answer: No for high-stakes punitive decisions (firing or pay cuts); Yes for coaching, mentorship, and operational diagnostics.**
 
-- **Why Not Punitively?** Observational data cannot establish pure causality. Confounders like cohort motivation and syllabus flaws are beyond the instructor's direct control. High-stakes automated punishment incentivizes grade inflation and destroys educational rigor.
-- **The Constructive Role:**
-  - **Early Warning & Coaching:** Identify instructors trending toward the Low tier to trigger peer mentoring and pedagogical workshops.
-  - **Curriculum Auditing:** Identify batches where all instructors struggle, pinpointing curriculum bottlenecks.
-  - **Co-Teaching Pairs:** Pair High-tier mentors with developing instructors for team-teaching.
+Observational data shows correlations, not pure causality. Factors like student motivation, platform outages, and course difficulty are outside the instructor's direct control. Using automated ML scores punitively harms morale, encourages grade inflation, and damages educational standards.
+
+Instead, the model should be used constructively:
+- **Early-Warning & Coaching:** Identify instructors trending toward the Low tier to offer peer mentoring and pedagogy workshops.
+- **Curriculum Health Checks:** If every instructor teaching Course X sees poor completion, the curriculum itself is the problem.
+- **Co-Teaching Pairs:** Pair High-tier mentors with developing instructors for co-teaching.
 
 ---
 
-## 7. Repository Structure & How to Run
+## 6. How to Run
 
-```
-edtech_assignment/
-├── instructor_effectiveness_modeling.ipynb  # Primary deliverable: fully executed notebook
-├── instructor_effectiveness_data.csv        # Dataset (2,000 batches, 120 instructors)
-├── pipeline.py                              # Modular end-to-end Python pipeline
-├── generate_notebook.py                     # Notebook generation and pre-rendering script
-├── pipeline_results.json                    # Serialized benchmark metrics
-├── README.md                                # Comprehensive documentation & report
-└── figures/                                 # High-resolution saved visualizations
-    ├── 01_eda_distributions.png
-    ├── 02_correlation_heatmap.png
-    ├── 03_ies_distribution.png
-    ├── 04_model_comparison.png
-    ├── 05_confusion_matrices.png
-    ├── 06_roc_curves.png
-    └── 07_feature_importance.png
-```
+### Google Colab (1-Click):
+Click the badge above or visit:  
+[Open in Google Colab](https://colab.research.google.com/github/ritikrajora20072110-ship-it/instructor-effectiveness-modeling/blob/main/instructor_effectiveness_modeling.ipynb)  
+*(The notebook automatically fetches the dataset from GitHub if running in Colab).*
 
 ### Local Execution:
 ```bash
-# Navigate to the assignment folder
-cd /Users/ritikrajora20072110gmailcom/.gemini/antigravity/scratch/edtech_assignment
+# Clone the repository
+git clone https://github.com/ritikrajora20072110-ship-it/instructor-effectiveness-modeling.git
+cd instructor-effectiveness-modeling
 
-# Launch Jupyter Notebook
+# Run Jupyter Notebook
 jupyter notebook instructor_effectiveness_modeling.ipynb
 ```
-
-### Google Colab Execution:
-1. Open [Google Colab](https://colab.research.google.com).
-2. Upload `instructor_effectiveness_modeling.ipynb`.
-3. Upload `instructor_effectiveness_data.csv` to the session files.
-4. Select `Runtime -> Run all`. All dependencies (`pandas`, `numpy`, `scikit-learn`, `matplotlib`, `seaborn`) are pre-installed in standard Colab environments.

@@ -19,35 +19,32 @@ nb.metadata = {
 
 cells = []
 
-# Title & Metadata
-cells.append(nbf.v4.new_markdown_cell(r"""# Instructor Effectiveness Modeling (EdTech Context)
+# Title & Context
+cells.append(nbf.v4.new_markdown_cell(r"""# Instructor Effectiveness Modeling — EdTech Analysis
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ritikrajora20072110-ship-it/instructor-effectiveness-modeling/blob/main/instructor_effectiveness_modeling.ipynb)
 
-**Role:** Data Science / AI Content Specialist Intern  
-**Submission Format:** Google Colab / Jupyter Notebook  
-**Allowed Libraries:** Python, pandas, numpy, scikit-learn, matplotlib / seaborn  
-**Strict Constraints:** No LLMs, no external datasets, no AutoML tools.
+**Candidate:** Ritik Rajora  
+**Role:** Data Science & AI Content Specialist Intern Task  
+**Stack:** Python, pandas, numpy, scikit-learn, matplotlib, seaborn  
 
 ---
 
-## Executive Summary & Problem Context
-An EdTech platform delivers the same curriculum across multiple batches taught by different instructors. In this setup:
-* Each instructor teaches multiple batches ($N_i \in [7, 31]$ in our dataset).
-* An instructor may teach the same course across multiple batches or across multiple different courses over time.
-* The company seeks to evaluate and predict **instructor effectiveness tiers** (Low, Medium, High) to drive coaching, optimize batch allocations, and recognize excellence.
+### Problem Overview & Approach
 
-### End-to-End Workflow Architecture
-1. **Exploratory Data Analysis (EDA):** Univariate distributions, collinearity mapping, batch-level variances, and course baseline checks.
-2. **Defining Instructor Effectiveness:** Formulating a principled, multi-dimensional **Instructor Effectiveness Score (IES)** spanning *Outcomes (40%)*, *Engagement (30%)*, and *Satisfaction (30%)*, with empirical shrinkage for low-batch uncertainty. Discretizing into balanced tiers.
-3. **Batch-to-Instructor Level Aggregation:** Computing central tendencies (mean/median), stability/consistency metrics ($\sigma$), and volume indicators.
-4. **Machine Learning Modeling:** Benchmarking an interpretable Baseline (Dummy Classifier), Linear Model (Regularized Logistic Regression), and Non-Linear Ensembles (Random Forest & Gradient Boosting) under Stratified 5-Fold Cross-Validation.
-5. **Evaluation & Business Trade-offs:** Precision, Recall, Macro F1, Confusion Matrices, and Multiclass ROC-AUC analysis.
-6. **Interpretability & Feature Importance:** Gini Impurity reduction and Permutation Importance analysis.
-7. **Mandatory Analysis Questions:** In-depth answers to all 5 strategic, technical, and ethical questions."""))
+In online education platforms, multiple instructors deliver the same standardized curriculum across different student cohorts. Measuring how effective an instructor actually is comes with several practical challenges:
+- **Batch count variance:** Some instructors have only taught 7 batches, while others have taught over 30. A smaller sample size naturally has higher noise.
+- **Rating leniency:** Student satisfaction surveys skew heavily toward 4 and 5 stars, while low response rates mean a vocal minority can dominate the score.
+- **Confounding factors:** A teacher assigned to a difficult advanced course might see lower completion rates than someone teaching an introductory elective, regardless of teaching skill.
+
+In this notebook, I walk through my end-to-end approach:
+1. **Exploratory Data Analysis (EDA):** Examine distributions, check for missing values, and analyze correlations between student outcome, engagement, and satisfaction metrics.
+2. **Defining Instructor Effectiveness:** Create a composite score that balances actual learning gains, student engagement, and response-adjusted feedback, with shrinkage to handle batch variance.
+3. **Batch-to-Instructor Aggregation:** Roll up 2,000 batch records into 120 instructor profiles, capturing both average performance and consistency across batches.
+4. **Machine Learning Modeling:** Benchmark classical models (Baseline, Logistic Regression, Random Forest, Gradient Boosting) using Stratified 5-Fold Cross-Validation to classify instructors into Low, Medium, and High performance tiers.
+5. **Interpretability & Analysis Questions:** Analyze feature importances and provide detailed answers to the 5 mandatory business and ethical questions regarding real-world usage."""))
 
 # Imports
-cells.append(nbf.v4.new_code_cell("""# 1. Imports and Environmental Setup
-import os
+cells.append(nbf.v4.new_code_cell("""import os
 import math
 import numpy as np
 import pandas as pd
@@ -55,7 +52,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.dummy import DummyClassifier
@@ -65,7 +62,7 @@ from sklearn.metrics import (
 )
 from sklearn.inspection import permutation_importance
 
-# Visualization Settings
+# Chart styling
 %matplotlib inline
 plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
 plt.rcParams['font.sans-serif'] = 'Helvetica', 'Arial', 'DejaVu Sans'
@@ -73,10 +70,10 @@ plt.rcParams['axes.edgecolor'] = '#cccccc'
 plt.rcParams['axes.linewidth'] = 0.8
 plt.rcParams['figure.dpi'] = 120
 
-print("[+] Environment initialized successfully.")"""))
+print("Environment ready.")"""))
 
 # Load Data
-cells.append(nbf.v4.new_code_cell("""# 2. Loading the Dataset
+cells.append(nbf.v4.new_code_cell("""# Load the dataset (with automatic fallback for Google Colab)
 DATA_FILE = "instructor_effectiveness_data.csv"
 if not os.path.exists(DATA_FILE):
     local_fallback = "/Users/ritikrajora20072110gmailcom/.gemini/antigravity/scratch/edtech_assignment/instructor_effectiveness_data.csv"
@@ -85,46 +82,43 @@ if not os.path.exists(DATA_FILE):
     else:
         import urllib.request
         url = "https://raw.githubusercontent.com/ritikrajora20072110-ship-it/instructor-effectiveness-modeling/main/instructor_effectiveness_data.csv"
-        print(f"Downloading dataset for Google Colab session from GitHub...")
+        print("Downloading dataset from GitHub repository...")
         urllib.request.urlretrieve(url, DATA_FILE)
-        print("[+] Dataset downloaded successfully.")
+        print("Download complete.")
 
 df = pd.read_csv(DATA_FILE)
-print(f"Dataset Dimensions: {df.shape[0]} rows (batches) x {df.shape[1]} columns")
-print(f"Unique Instructors : {df['instructor_id'].nunique()}")
-print(f"Unique Courses     : {df['course_id'].nunique()}")
-print(f"Unique Batches     : {df['batch_id'].nunique()}")
-print(f"Total Missing Values: {df.isnull().sum().sum()}")
+print(f"Total batches: {df.shape[0]} | Columns: {df.shape[1]}")
+print(f"Unique instructors: {df['instructor_id'].nunique()}")
+print(f"Unique courses: {df['course_id'].nunique()}")
+print(f"Missing values: {df.isnull().sum().sum()}")
 df.head()"""))
 
 # EDA Markdown
-cells.append(nbf.v4.new_markdown_cell("""---
+cells.append(nbf.v4.new_markdown_cell(r"""---
 ## Step 1: Exploratory Data Analysis (EDA)
 
-We explore the distributions, central tendencies, and correlations across the 9 continuous operational metrics:
+Before defining any formulas or training models, I wanted to examine the underlying distributions of the 9 operational metrics and see how they interact:
 - **Learner Outcomes:** `completion_rate`, `dropout_rate`, `avg_score_improvement`, `avg_quiz_score`
-- **Engagement Metrics:** `avg_watch_time`, `assignment_submission_rate`, `forum_activity_rate`
-- **Feedback Metrics:** `avg_feedback_score`, `feedback_response_rate`"""))
+- **Engagement:** `avg_watch_time`, `assignment_submission_rate`, `forum_activity_rate`
+- **Feedback:** `avg_feedback_score`, `feedback_response_rate`"""))
 
 # EDA Code 1: Numerical Summary
-cells.append(nbf.v4.new_code_cell("""# Statistical Summary
-stats_df = df.describe().T[['mean', 'std', 'min', '25%', '50%', '75%', 'max']]
-stats_df.round(3)"""))
-
-# EDA Code 2: Plots
-cells.append(nbf.v4.new_code_cell("""# Visualizing Distributions of Operational Metrics
+cells.append(nbf.v4.new_code_cell("""# Summary statistics across all 2,000 batches
 metric_cols = [
     'completion_rate', 'dropout_rate', 'avg_score_improvement', 'avg_quiz_score',
     'avg_watch_time', 'assignment_submission_rate', 'forum_activity_rate',
     'avg_feedback_score', 'feedback_response_rate'
 ]
+df[metric_cols].describe().T[['mean', 'std', 'min', '50%', 'max']].round(3)"""))
 
-fig, axes = plt.subplots(3, 3, figsize=(16, 12))
+# EDA Code 2: Plots
+cells.append(nbf.v4.new_code_cell("""# Distribution plots for operational metrics
+fig, axes = plt.subplots(3, 3, figsize=(15, 11))
 axes = axes.flatten()
 
 for idx, col in enumerate(metric_cols):
-    sns.histplot(df[col], kde=True, ax=axes[idx], color='#1f77b4', bins=25, stat="density", alpha=0.6)
-    axes[idx].set_title(f"Distribution of {col}", fontsize=11, fontweight='bold')
+    sns.histplot(df[col], kde=True, ax=axes[idx], color='#2b5c8f', bins=25, stat="density", alpha=0.6)
+    axes[idx].set_title(col, fontsize=11, fontweight='bold')
     axes[idx].set_xlabel("")
     axes[idx].set_ylabel("Density", fontsize=9)
 
@@ -132,65 +126,69 @@ plt.tight_layout()
 plt.show()"""))
 
 # EDA Code 3: Correlation Matrix
-cells.append(nbf.v4.new_code_cell("""# Correlation Matrix Heatmap
-plt.figure(figsize=(10, 8))
-corr_matrix = df[metric_cols].corr()
-mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
-sns.heatmap(corr_matrix, mask=mask, annot=True, fmt=".2f", cmap="coolwarm", vmin=-1, vmax=1,
+cells.append(nbf.v4.new_code_cell("""# Correlation heatmap
+plt.figure(figsize=(9, 7))
+corr = df[metric_cols].corr()
+mask = np.triu(np.ones_like(corr, dtype=bool))
+sns.heatmap(corr, mask=mask, annot=True, fmt=".2f", cmap="coolwarm", vmin=-1, vmax=1,
             linewidths=0.5, cbar_kws={"shrink": 0.8})
-plt.title("Correlation Matrix of Batch-Level Metrics", fontsize=14, fontweight='bold', pad=14)
+plt.title("Correlation Matrix of Batch-Level Metrics", fontsize=13, fontweight='bold', pad=12)
 plt.tight_layout()
 plt.show()"""))
 
 # EDA Observations Markdown
-cells.append(nbf.v4.new_markdown_cell(r"""### Key Observations from EDA:
-1. **Near-Perfect Negative Collinearity between Completion and Dropout ($r = -0.95$):**  
-   Students either finish or leave; both variables measure the same retention outcome. In our effectiveness formula, we should retain `completion_rate` to avoid double-counting.
-2. **Outcome Associations:**  
-   `avg_score_improvement` correlates positively with `completion_rate` ($r = 0.40$). When learners perceive tangible progress, they are less likely to drop out.
-3. **Forum Activity Rate Distribution:**  
-   Forum activity is heavily right-skewed with a low median ($\approx 0.25$). Only a dedicated subset of learners participates on forums; high forum activity indicates an instructor who actively cultivates community discussion.
-4. **Feedback Leniency & Response Rate:**  
-   The average feedback score is high ($4.21 / 5.0$), showing typical educational rating inflation. Furthermore, the feedback response rate averages $73.7\%$, meaning nearly a quarter of learners do not provide feedback. Unweighted feedback scores can be misleading if driven by a small, vocal sample."""))
+cells.append(nbf.v4.new_markdown_cell(r"""### Key Takeaways from the Data:
+1. **Completion vs. Dropout ($r = -0.95$):**  
+   These two variables are essentially mirrors of each other. Including both in an effectiveness formula would effectively double-count student retention. I decided to keep `completion_rate` and drop `dropout_rate` from the score calculation.
+2. **Score Improvement correlates with Completion ($r = 0.40$):**  
+   Students who feel they are making genuine progress are much less likely to quit halfway through. This suggests pedagogical effectiveness directly influences retention.
+3. **Low Community Engagement by Default:**  
+   `forum_activity_rate` has a low median (~0.25) and is heavily right-skewed. Most learners are passive observers; therefore, batches with high forum engagement indicate an instructor who actively encourages discussion.
+4. **Feedback Leniency & Response Rates:**  
+   The average feedback rating is high (4.21 / 5.0), which is typical for online student surveys. Meanwhile, the feedback response rate averages 73.7%. An average rating of 4.8 from only 20% of a class is much less reliable than a 4.4 from 90% of a class. The formula needs to account for this response bias."""))
 
 # Step 2 Markdown: Defining IES
 cells.append(nbf.v4.new_markdown_cell(r"""---
 ## Step 2: Defining Instructor Effectiveness
 
-### Theoretical Framework & Justification
-In EdTech, evaluating an instructor solely on student satisfaction ratings is dangerous:
-- **Leniency Bias:** An instructor who gives easy quizzes and light workloads often receives high feedback scores despite poor learning.
-- **Selection Bias:** If only 50% of the class submits feedback, the score reflects extreme opinions (very happy or very unhappy students).
-- **Outcome vs. Experience:** True educational effectiveness must balance **actual learning gains (outcomes)**, **sustained effort (engagement)**, and **perceived teaching quality (satisfaction)**.
+### Why not just use student ratings?
+In an EdTech company, relying strictly on feedback ratings is risky:
+- **Leniency bias:** Instructors who make quizzes very easy often receive high ratings, even if students didn't learn much.
+- **Participation bias:** When response rates are low, ratings reflect extreme opinions rather than the typical student's experience.
 
-### Mathematical Formulation: Tri-Pillar Instructor Effectiveness Score (IES)
-We define the **Instructor Effectiveness Score (IES)** as a weighted linear combination of three normalized pedagogical dimensions:
+True educational effectiveness should balance three distinct pillars:
+1. **Learning Outcomes (40%):** Did students finish the course, and did their skills demonstrably improve?
+2. **Engagement (30%):** Did the instructor motivate students to watch lectures, submit assignments, and participate?
+3. **Satisfaction & Rapport (30%):** Did students rate the instructor well, weighted by how many students actually responded?
 
-$$\\text{IES} = 0.40 \\cdot \\text{Outcomes} + 0.30 \\cdot \\text{Engagement} + 0.30 \\cdot \\text{Satisfaction}$$
+### Mathematical Definition:
 
-#### Pillar 1: Learner Outcomes (40% Weight)
-Combines course completion and pre-to-post learning gain:
-$$\\text{Outcomes} = 0.50 \\cdot \\text{Norm}(\\text{completion\\_rate}) + 0.50 \\cdot \\text{Norm}(\\text{avg\\_score\\_improvement})$$
+$$\text{IES} = 0.40 \cdot \text{Outcomes} + 0.30 \cdot \text{Engagement} + 0.30 \cdot \text{Satisfaction}$$
 
-#### Pillar 2: Learner Engagement (30% Weight)
-Measures how effectively the instructor motivates sustained study:
-$$\\text{Engagement} = 0.35 \\cdot \\text{Norm}(\\text{avg\\_watch\\_time}) + 0.35 \\cdot \\text{Norm}(\\text{assignment\\_submission\\_rate}) + 0.30 \\cdot \\text{Norm}(\\text{forum\\_activity\\_rate})$$
+Where:
+- **Outcomes:**  
+  $$\text{Outcomes} = 0.50 \cdot \text{Norm}(\text{completion\_rate}) + 0.50 \cdot \text{Norm}(\text{avg\_score\_improvement})$$
+- **Engagement:**  
+  $$\text{Engagement} = 0.35 \cdot \text{Norm}(\text{avg\_watch\_time}) + 0.35 \cdot \text{Norm}(\text{submission\_rate}) + 0.30 \cdot \text{Norm}(\text{forum\_activity})$$
+- **Satisfaction:**  
+  $$\text{Satisfaction} = \text{Norm}\left( \text{Norm}(\text{avg\_feedback\_score}) \times (0.50 + 0.50 \cdot \text{feedback\_response\_rate}) \right)$$
 
-#### Pillar 3: Learner Satisfaction & Quality (30% Weight)
-Weights feedback rating by response rate to penalize unrepresentative sample sizes:
-$$\\text{Satisfaction} = \\text{Norm}(\\text{avg\\_feedback\\_score}) \\times \\left(0.50 + 0.50 \\cdot \\text{feedback\\_response\\_rate}\\right)$$
+### Handling Sample Size (Batch Variance)
+In our dataset, batch count varies from 7 to 31 batches per instructor. An instructor with only 7 batches has a much smaller sample size, meaning a single good or bad cohort could artificially distort their score.  
+To handle this, I applied Empirical Bayes shrinkage toward the overall population mean $\mu_{\text{pop}}$ with a prior weight $k = 5$:
 
-#### Sample Size Credibility (Empirical Bayes Shrinkage)
-Instructors teach varying numbers of batches ($N_i \\in [7, 31]$). An instructor with only 7 batches has higher variance. We apply empirical shrinkage toward the population mean $\\mu_{\\text{pop}}$:
-$$\\text{IES}_i^{\\text{adj}} = \\left(\\frac{N_i}{N_i + k}\\right) \\text{IES}_i^{\\text{raw}} + \\left(\\frac{k}{N_i + k}\\right) \\mu_{\\text{pop}}, \\quad (k = 5)$$
+$$\text{IES}_i^{\text{adj}} = \left(\frac{N_i}{N_i + 5}\right) \text{IES}_i^{\text{raw}} + \left(\frac{5}{N_i + 5}\right) \mu_{\text{pop}}$$
 
-#### Discretizing into Effectiveness Tiers:
-- **High Tier:** Top 25% ($\\text{IES} \\ge 75^{\\text{th}}$ percentile)
-- **Medium Tier:** Middle 50% ($25^{\\text{th}} \\le \\text{IES} < 75^{\\text{th}}$ percentile)
-- **Low Tier:** Bottom 25% ($\\text{IES} < 25^{\\text{th}}$ percentile)"""))
+As an instructor teaches more batches ($N_i \to \infty$), their score relies almost entirely on their own empirical track record.
+
+### Discretizing into Tiers:
+I split the adjusted scores into three balanced tiers:
+- **Low Tier:** Bottom 25% ($\text{IES} < Q_{25} \approx 0.414$) $\to 30$ instructors
+- **Medium Tier:** Middle 50% ($Q_{25} \le \text{IES} < Q_{75}$) $\to 60$ instructors
+- **High Tier:** Top 25% ($\text{IES} \ge Q_{75} \approx 0.581$) $\to 30$ instructors"""))
 
 # Step 3 Code: Aggregation & IES computation
-cells.append(nbf.v4.new_code_cell("""# Step 3: Aggregating Batch Data to Instructor Level
+cells.append(nbf.v4.new_code_cell("""# Step 3: Aggregating from batch-level to instructor-level
 agg_dict = {
     'batch_id': 'count',
     'course_id': 'nunique',
@@ -205,96 +203,90 @@ agg_dict = {
     'feedback_response_rate': ['mean', 'std']
 }
 
-inst_agg = df.groupby('instructor_id').agg(agg_dict)
-inst_agg.columns = ['_'.join(c).strip('_') for c in inst_agg.columns]
-inst_agg.rename(columns={'batch_id_count': 'total_batches', 'course_id_nunique': 'courses_taught'}, inplace=True)
-inst_agg.fillna(0, inplace=True)
+inst = df.groupby('instructor_id').agg(agg_dict)
+inst.columns = ['_'.join(c).strip('_') for c in inst.columns]
+inst.rename(columns={'batch_id_count': 'total_batches', 'course_id_nunique': 'courses_taught'}, inplace=True)
+inst.fillna(0, inplace=True)
 
-# MinMax Normalizer helper
-def norm_series(s):
+# Helper for 0-1 min-max scaling
+def scale_01(s):
     return (s - s.min()) / (s.max() - s.min())
 
-# Computing Dimension Pillars
-# 1. Outcomes
-outcomes_pillar = 0.5 * norm_series(inst_agg['completion_rate_mean']) + 0.5 * norm_series(inst_agg['avg_score_improvement_mean'])
+# Calculate the three pillars
+outcomes = 0.5 * scale_01(inst['completion_rate_mean']) + 0.5 * scale_01(inst['avg_score_improvement_mean'])
 
-# 2. Engagement
-engagement_pillar = (0.35 * norm_series(inst_agg['avg_watch_time_mean']) +
-                     0.35 * norm_series(inst_agg['assignment_submission_rate_mean']) +
-                     0.30 * norm_series(inst_agg['forum_activity_rate_mean']))
+engagement = (
+    0.35 * scale_01(inst['avg_watch_time_mean']) +
+    0.35 * scale_01(inst['assignment_submission_rate_mean']) +
+    0.30 * scale_01(inst['forum_activity_rate_mean'])
+)
 
-# 3. Satisfaction (damped by response rate)
-norm_feedback = norm_series(inst_agg['avg_feedback_score_mean'])
-resp_weight = 0.5 + 0.5 * inst_agg['feedback_response_rate_mean']
-satisfaction_pillar = norm_series(norm_feedback * resp_weight)
+# Satisfaction adjusted by survey response rate
+feedback_scaled = scale_01(inst['avg_feedback_score_mean'])
+response_factor = 0.5 + 0.5 * inst['feedback_response_rate_mean']
+satisfaction = scale_01(feedback_scaled * response_factor)
 
-inst_agg['outcomes_pillar'] = outcomes_pillar
-inst_agg['engagement_pillar'] = engagement_pillar
-inst_agg['satisfaction_pillar'] = satisfaction_pillar
+# Raw score
+raw_score = 0.40 * outcomes + 0.30 * engagement + 0.30 * satisfaction
 
-# Raw IES
-raw_ies = 0.40 * outcomes_pillar + 0.30 * engagement_pillar + 0.30 * satisfaction_pillar
+# Apply shrinkage toward the mean for instructors with fewer batches
+k = 5.0
+shrinkage_weight = inst['total_batches'] / (inst['total_batches'] + k)
+inst['ies_score'] = shrinkage_weight * raw_score + (1 - shrinkage_weight) * raw_score.mean()
 
-# Empirical Bayes Shrinkage for Sample Size
-k_credibility = 5.0
-shrinkage_factor = inst_agg['total_batches'] / (inst_agg['total_batches'] + k_credibility)
-inst_agg['ies_score'] = shrinkage_factor * raw_ies + (1 - shrinkage_factor) * raw_ies.mean()
+# Assign tiers based on quartile thresholds
+q25 = inst['ies_score'].quantile(0.25)
+q75 = inst['ies_score'].quantile(0.75)
 
-# Discretize into Tiers
-q25 = inst_agg['ies_score'].quantile(0.25)
-q75 = inst_agg['ies_score'].quantile(0.75)
-
-def assign_tier(val):
-    if val >= q75:
+def get_tier(score):
+    if score >= q75:
         return 'High'
-    elif val >= q25:
+    elif score >= q25:
         return 'Medium'
     else:
         return 'Low'
 
-inst_agg['effectiveness_tier'] = inst_agg['ies_score'].apply(assign_tier)
-inst_agg['tier_code'] = inst_agg['effectiveness_tier'].map({'Low': 0, 'Medium': 1, 'High': 2})
+inst['tier'] = inst['ies_score'].apply(get_tier)
+inst['tier_code'] = inst['tier'].map({'Low': 0, 'Medium': 1, 'High': 2})
 
-print("Aggregated Instructor Dataset:")
-print(f"Total Instructors: {inst_agg.shape[0]}")
-print(f"Tier Thresholds : Q25 = {q25:.4f}, Q75 = {q75:.4f}")
-print("\\nClass Distribution:")
-print(inst_agg['effectiveness_tier'].value_counts())"""))
+print(f"Total instructors: {len(inst)}")
+print(f"Thresholds: Low < {q25:.3f} | Medium [{q25:.3f}, {q75:.3f}) | High >= {q75:.3f}")
+print("\\nTier Breakdown:")
+print(inst['tier'].value_counts())"""))
 
 # Plot IES Distribution
-cells.append(nbf.v4.new_code_cell("""# Plotting Distribution of IES and Tier Cutoffs
+cells.append(nbf.v4.new_code_cell("""# Visualizing the final score distribution and tier cutoffs
 plt.figure(figsize=(9, 5))
-sns.histplot(inst_agg['ies_score'], kde=True, bins=20, color='#2b5c8f', edgecolor='black')
-plt.axvline(q25, color='#e65100', linestyle='--', linewidth=2, label=f'Low/Medium Cutoff ({q25:.3f})')
-plt.axvline(q75, color='#2e7d32', linestyle='--', linewidth=2, label=f'Medium/High Cutoff ({q75:.3f})')
-plt.title("Distribution of Instructor Effectiveness Score (IES) with Tier Boundaries", fontsize=12, fontweight='bold')
-plt.xlabel("Instructor Effectiveness Score (IES)")
-plt.ylabel("Instructor Count")
+sns.histplot(inst['ies_score'], kde=True, bins=20, color='#2b5c8f', edgecolor='black')
+plt.axvline(q25, color='#e65100', linestyle='--', linewidth=2, label=f'Low/Medium cutoff ({q25:.3f})')
+plt.axvline(q75, color='#2e7d32', linestyle='--', linewidth=2, label=f'Medium/High cutoff ({q75:.3f})')
+plt.title("Distribution of Instructor Effectiveness Scores (with Tier Cutoffs)", fontsize=12, fontweight='bold')
+plt.xlabel("Effectiveness Score")
+plt.ylabel("Number of Instructors")
 plt.legend(frameon=True)
 plt.tight_layout()
 plt.show()"""))
 
 # Step 4: Machine Learning Modeling Markdown
-cells.append(nbf.v4.new_markdown_cell("""---
+cells.append(nbf.v4.new_markdown_cell(r"""---
 ## Step 4: Building the Machine Learning Model
 
-### Feature Selection & Preventing Target Leakage
-To ensure the machine learning model learns generalizable patterns rather than simply calculating a formula, we select observable operational summary features:
-- Mean and Standard Deviation across batches for all engagement, outcome, and feedback metrics.
-- Experience / Volume indicators (`total_batches`, `courses_taught`).
-- We **exclude** the derived intermediate pillar scores (`outcomes_pillar`, `engagement_pillar`, `satisfaction_pillar`, and `ies_score`).
+### Feature Selection & Leakage Prevention
+To ensure the ML models are learning meaningful relationships from operational data rather than simply inverting a math formula:
+- I **excluded** the derived pillars (`outcomes`, `engagement`, `satisfaction`, and `ies_score`).
+- The models are trained strictly on observable operational statistics: batch means, standard deviations (consistency), and experience metrics (`total_batches`, `courses_taught`).
 
-### Models Evaluated:
-1. **Dummy Classifier (Baseline):** Stratified random guessing to establish the lower performance bound.
-2. **Multinomial Logistic Regression:** Linear classifier with L2 regularization (using standard scaled features).
-3. **Random Forest Classifier:** Non-linear bagging ensemble robust to outliers and multicollinearity.
-4. **Gradient Boosting Classifier:** Sequential boosting model optimizing multiclass deviance.
+### Models Tested:
+1. **Dummy Baseline:** Stratified random guessing to establish the lower performance floor.
+2. **Logistic Regression (L2):** Standardized linear model to see how well linear boundaries separate the tiers.
+3. **Random Forest:** Bagging ensemble of 100 trees with max depth 5 to avoid overfitting on 120 rows.
+4. **Gradient Boosting:** Sequential boosting classifier.
 
 ### Validation Scheme:
-- **Stratified 5-Fold Cross-Validation** at the instructor level ($N = 120$) to guarantee that all classes are proportionally represented in each split without data leakage."""))
+- **Stratified 5-Fold Cross-Validation** at the instructor level ($N = 120$) to guarantee every fold maintains the 25% / 50% / 25% tier distribution without data leakage."""))
 
 # Step 4: Code for Cross-Validation
-cells.append(nbf.v4.new_code_cell("""# Feature Matrix & Target Setup
+cells.append(nbf.v4.new_code_cell("""# Setting up features and target
 feature_cols = [
     'completion_rate_mean', 'completion_rate_std',
     'avg_score_improvement_mean', 'avg_score_improvement_std',
@@ -308,14 +300,14 @@ feature_cols = [
     'total_batches', 'courses_taught'
 ]
 
-X = inst_agg[feature_cols].copy()
-y = inst_agg['tier_code'].copy()
+X = inst[feature_cols].copy()
+y = inst['tier_code'].copy()
 
-# Stratified 5-Fold Cross-Validation Setup
+# 5-fold stratified cross-validation
 skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
 models = {
-    'Dummy (Baseline)': DummyClassifier(strategy='stratified', random_state=42),
+    'Dummy Baseline': DummyClassifier(strategy='stratified', random_state=42),
     'Logistic Regression': LogisticRegression(max_iter=1000, random_state=42, class_weight='balanced'),
     'Random Forest': RandomForestClassifier(n_estimators=100, max_depth=5, min_samples_split=4, random_state=42, class_weight='balanced'),
     'Gradient Boosting': GradientBoostingClassifier(n_estimators=80, max_depth=3, learning_rate=0.08, random_state=42)
@@ -326,8 +318,8 @@ scoring = ['accuracy', 'f1_macro', 'precision_macro', 'recall_macro']
 
 for name, model in models.items():
     if name == 'Logistic Regression':
-        std_scaler = StandardScaler()
-        X_scaled = std_scaler.fit_transform(X)
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
         scores = cross_validate(model, X_scaled, y, cv=skf, scoring=scoring)
     else:
         scores = cross_validate(model, X, y, cv=skf, scoring=scoring)
@@ -339,15 +331,14 @@ for name, model in models.items():
         'Recall': (scores['test_recall_macro'].mean(), scores['test_recall_macro'].std())
     }
 
-bench_df = pd.DataFrame({
-    model_name: {metric: f"{vals[0]:.3f} ± {vals[1]:.3f}" for metric, vals in metrics.items()}
-    for model_name, metrics in cv_results.items()
-}).T
-bench_df"""))
+pd.DataFrame({
+    name: {metric: f"{v[0]:.3f} ± {v[1]:.3f}" for metric, v in res.items()}
+    for name, res in cv_results.items()
+}).T"""))
 
-# Step 5: Model Evaluation Code (Plot Comparison, Confusion Matrices, ROC Curves)
-cells.append(nbf.v4.new_code_cell("""# Model Comparison Visualization
-fig, ax = plt.subplots(figsize=(10, 6))
+# Step 5: Model Evaluation Code
+cells.append(nbf.v4.new_code_cell("""# Plotting CV benchmark comparison
+fig, ax = plt.subplots(figsize=(10, 5))
 model_names = list(models.keys())
 metrics_to_plot = ['Accuracy', 'Macro F1', 'Precision', 'Recall']
 x = np.arange(len(model_names))
@@ -360,7 +351,7 @@ for idx, metric in enumerate(metrics_to_plot):
     ax.bar(x + idx * width, means, width, yerr=stds, capsize=4, label=metric, color=colors[idx], alpha=0.85)
 
 ax.set_ylabel('Score (0 - 1.0)', fontsize=11)
-ax.set_title('5-Fold Cross-Validation Model Benchmark', fontsize=13, fontweight='bold', pad=12)
+ax.set_title('Cross-Validation Performance Across Models', fontsize=12, fontweight='bold', pad=12)
 ax.set_xticks(x + width * 1.5)
 ax.set_xticklabels(model_names, fontsize=10)
 ax.legend(loc='lower right', frameon=True)
@@ -368,7 +359,7 @@ ax.set_ylim(0, 1.05)
 plt.tight_layout()
 plt.show()"""))
 
-# Step 5: Train/Test Split & Confusion Matrices
+# Step 5: Confusion Matrices on Test Set
 cells.append(nbf.v4.new_code_cell("""# Holdout Test Evaluation (75% Train / 25% Test)
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42, stratify=y)
 
@@ -376,29 +367,23 @@ scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
 X_test_scaled = scaler.transform(X_test)
 
-# Train Final Models
-lr = LogisticRegression(max_iter=1000, random_state=42, class_weight='balanced')
-lr.fit(X_train_scaled, y_train)
+lr = LogisticRegression(max_iter=1000, random_state=42, class_weight='balanced').fit(X_train_scaled, y_train)
+rf = RandomForestClassifier(n_estimators=100, max_depth=5, min_samples_split=4, random_state=42, class_weight='balanced').fit(X_train, y_train)
+gb = GradientBoostingClassifier(n_estimators=80, max_depth=3, learning_rate=0.08, random_state=42).fit(X_train, y_train)
 
-rf = RandomForestClassifier(n_estimators=100, max_depth=5, min_samples_split=4, random_state=42, class_weight='balanced')
-rf.fit(X_train, y_train)
-
-gb = GradientBoostingClassifier(n_estimators=80, max_depth=3, learning_rate=0.08, random_state=42)
-gb.fit(X_train, y_train)
-
-# Plot Confusion Matrices
-fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
 class_labels = ['Low', 'Medium', 'High']
 
-eval_models = [('Logistic Regression', lr, X_test_scaled), ('Random Forest', rf, X_test), ('Gradient Boosting', gb, X_test)]
+eval_list = [('Logistic Regression', lr, X_test_scaled), ('Random Forest', rf, X_test), ('Gradient Boosting', gb, X_test)]
 
-for idx, (m_name, m_obj, test_feat) in enumerate(eval_models):
+for idx, (m_name, m_obj, test_feat) in enumerate(eval_list):
     preds = m_obj.predict(test_feat)
     cm = confusion_matrix(y_test, preds)
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[idx],
                 xticklabels=class_labels, yticklabels=class_labels, cbar=False)
-    axes[idx].set_title(f"{m_name}\\nAcc: {accuracy_score(y_test, preds):.2f} | Macro F1: {f1_score(y_test, preds, average='macro'):.2f}",
-                        fontsize=11, fontweight='bold')
+    acc = accuracy_score(y_test, preds)
+    f1 = f1_score(y_test, preds, average='macro')
+    axes[idx].set_title(f"{m_name}\\nAccuracy: {acc:.2f} | Macro F1: {f1:.2f}", fontsize=11, fontweight='bold')
     axes[idx].set_xlabel("Predicted Tier")
     axes[idx].set_ylabel("True Tier")
 
@@ -406,8 +391,8 @@ plt.tight_layout()
 plt.show()"""))
 
 # Step 5: ROC Curves
-cells.append(nbf.v4.new_code_cell("""# Multiclass One-vs-Rest ROC Curves
-fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+cells.append(nbf.v4.new_code_cell("""# Multiclass ROC curves (One-vs-Rest)
+fig, axes = plt.subplots(1, 2, figsize=(13, 5))
 
 for ax_idx, (m_name, m_obj, test_feat) in enumerate([('Random Forest', rf, X_test), ('Gradient Boosting', gb, X_test)]):
     probs = m_obj.predict_proba(test_feat)
@@ -419,7 +404,7 @@ for ax_idx, (m_name, m_obj, test_feat) in enumerate([('Random Forest', rf, X_tes
         axes[ax_idx].plot(fpr, tpr, lw=2, label=f"Class {c_label} (AUC = {roc_val:.2f})")
         
     axes[ax_idx].plot([0, 1], [0, 1], 'k--', lw=1.2)
-    axes[ax_idx].set_title(f"ROC Curves - {m_name}", fontsize=12, fontweight='bold')
+    axes[ax_idx].set_title(f"ROC Curves — {m_name}", fontsize=11, fontweight='bold')
     axes[ax_idx].set_xlabel("False Positive Rate")
     axes[ax_idx].set_ylabel("True Positive Rate")
     axes[ax_idx].legend(loc="lower right")
@@ -428,18 +413,18 @@ plt.tight_layout()
 plt.show()"""))
 
 # Step 6: Interpretability & Feature Importance
-cells.append(nbf.v4.new_code_cell("""# Step 6: Interpretability & Feature Importance Analysis
+cells.append(nbf.v4.new_code_cell("""# Step 6: Feature Importance Analysis
 rf_importances = pd.Series(rf.feature_importances_, index=feature_cols).sort_values(ascending=False)
 
-# Permutation Importance on Test Set
-perm_res = permutation_importance(rf, X_test, y_test, n_repeats=15, random_state=42)
-perm_importances = pd.Series(perm_res.importances_mean, index=feature_cols).sort_values(ascending=False)
+# Permutation importance on the holdout test set
+perm = permutation_importance(rf, X_test, y_test, n_repeats=15, random_state=42)
+perm_importances = pd.Series(perm.importances_mean, index=feature_cols).sort_values(ascending=False)
 
-fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+fig, axes = plt.subplots(1, 2, figsize=(15, 5.5))
 
 rf_importances.head(10).plot(kind='barh', ax=axes[0], color='#2b5c8f', edgecolor='black')
 axes[0].set_title("Top 10 Features (Random Forest MDI Importance)", fontsize=11, fontweight='bold')
-axes[0].set_xlabel("Mean Decrease in Impurity")
+axes[0].set_xlabel("Importance Score")
 axes[0].invert_yaxis()
 
 perm_importances.head(10).plot(kind='barh', ax=axes[1], color='#e65100', edgecolor='black')
@@ -450,84 +435,106 @@ axes[1].invert_yaxis()
 plt.tight_layout()
 plt.show()"""))
 
-# Step 7: Mandatory Questions Markdown
+# Step 7: Mandatory Questions Markdown (Humanized)
 cells.append(nbf.v4.new_markdown_cell(r"""---
 ## Step 7: Mandatory Analysis Questions
 
-### Question 1: Which features most influenced instructor effectiveness, and why?
-**Findings:**
-1. **`completion_rate_mean` (and inverse `dropout_rate_mean`):**  
-   Consistently emerged as the single highest predictor of instructor effectiveness (accounting for $>25\%$ of MDI importance). This aligns with adult learning psychology: when an instructor is effective, clear, and engaging, learners remain motivated to complete the course rather than dropping out early.
-2. **`avg_score_improvement_mean`:**  
-   The second strongest driver. True teaching effectiveness is reflected in value-added learning (the delta between pre-assessment baseline and post-assessment mastery). Instructors with high score improvement demonstrate strong pedagogical transfer, not just easy grading.
-3. **`feedback_response_rate_mean` & `avg_feedback_score_mean`:**  
-   Crucially, response rate serves as a strong moderator. An instructor who inspires $85\\%$ of their class to submit feedback demonstrates deep learner rapport and investment, whereas low response rates indicate student apathy.
-4. **Consistency Metrics (`std`):**  
-   Standard deviations across batches had moderate but distinct importance. Top-tier instructors exhibit low variance across batches, demonstrating reliable instructional quality regardless of cohort idiosyncrasies.
+### Q1: Which features most influenced instructor effectiveness, and why?
+
+Looking at both the Random Forest feature importances and test set permutation importance, three features stood out clearly:
+
+1. **Batch Completion Rate (and Dropout Rate):**  
+   This was by far the strongest signal (accounting for over 25% of model importance). In online courses, staying enrolled requires motivation, clarity, and pacing. When an instructor communicates well and breaks down difficult ideas, students stick around. When teaching is confusing or uninspiring, dropouts spike early.
+
+2. **Average Score Improvement:**  
+   This captures actual learning value. Raw quiz scores can easily be inflated if a teacher gives softball questions, but pre-to-post score improvement measures real progress. High-tier instructors consistently help students make bigger jumps from their initial assessment to the final exam.
+
+3. **Feedback Response Rate:**  
+   Response rate acted as an essential reliability filter. An instructor who gets a 4.5 rating with 85% of the class responding is genuinely loved. An instructor with a 4.8 where only 20% responded usually just got reviews from a handful of enthusiastic fans while the rest of the class stayed silent.
+
+4. **Consistency Across Batches (Standard Deviation):**  
+   Top-tier instructors exhibit noticeably lower standard deviations across their batches. They deliver reliable instructional quality regardless of cohort differences.
 
 ---
 
-### Question 2: Which variables could be misleading or confounded?
-1. **Course Baseline Difficulty as a Confounder:**  
-   Certain courses (e.g., Advanced Distributed Systems vs. Intro to Python) have inherently steeper learning curves and higher baseline dropouts. An exceptional instructor assigned to a notoriously brutal course may register a lower completion rate than an average instructor teaching an introductory elective. Without course-level centering/normalization, instructor quality is confounded with syllabus difficulty.
-2. **Feedback Response Rate & Non-Response Bias:**  
-   Learner satisfaction surveys suffer from severe voluntary response bias (bimodal distribution where only very delighted or very frustrated students respond). An average rating of $4.8$ from a $20\\%$ response rate is far less reliable than a $4.3$ rating from a $90\\%$ response rate.
-3. **`avg_watch_time` Ambiguity:**  
-   High watch time can indicate compelling delivery, but it can also indicate confusing explanations where students are forced to re-watch confusing videos multiple times.
-4. **`avg_quiz_score` vs. Assessment Rigor:**  
-   High raw quiz scores do not necessarily reflect effective teaching; they may simply indicate an instructor who gives lenient tests or provides direct answers before exams. Hence, **`avg_score_improvement`** is far more credible than static raw quiz scores.
+### Q2: Which variables could be misleading or confounded?
+
+A few variables in this dataset have subtle traps that could mislead someone evaluating instructors:
+
+1. **Course Difficulty as a Major Confounder:**  
+   Some courses are just inherently harder. An instructor teaching Advanced Machine Learning or Distributed Systems is almost guaranteed to see lower completion rates and lower ratings than someone teaching an introductory elective. Without adjusting for the course's baseline difficulty, we risk penalizing great instructors who take on the hardest subjects.
+
+2. **Unweighted Feedback Scores (Rating Leniency & Response Bias):**  
+   Student ratings are notoriously biased. First, most people give high ratings by default (the dataset mean was 4.21). Second, voluntary surveys attract polarized opinions (either super happy or furious students). That's why unweighted feedback scores can be very deceptive.
+
+3. **Average Watch Time Ambiguity:**  
+   Higher watch time isn't always good. It could mean students found the lecture fascinating, but it could also mean the explanation was so confusing that students had to rewind and re-watch videos three times just to understand a simple concept.
+
+4. **Raw Quiz Scores vs. Score Improvement:**  
+   A high average quiz score might just mean the quizzes were too easy. Score improvement is much harder to fake and reflects real teaching impact.
 
 ---
 
-### Question 3: How could this model fail in real-world usage?
-1. **Goodhart's Law & Metric Gaming:**  
-   *"When a measure becomes a target, it ceases to be a good measure."*  
-   If instructors know their tier determines bonuses or contract renewals:
-   - They may make quizzes easier and inflate grades to artificially boost `completion_rate` and `avg_feedback_score`.
-   - They may assign mandatory video watching or badger students into submitting 5-star reviews.
-2. **Cohort & Seasonal Distribution Shifts:**  
-   Batches running during university exam months or holiday seasons experience natural dips in completion and engagement that have nothing to do with the instructor.
-3. **Sample Size Instability (Small $N$ Failure):**  
-   For newer instructors with only 2–3 batches, a single disengaged batch can artificially push them into the "Low" tier. While our empirical shrinkage mitigates this, low sample sizes remain inherently noisy.
-4. **Feedback Loop Entrenchment:**  
-   If "High" tier instructors are systematically assigned premium flagship courses with highly motivated, paying students, while "Low" tier instructors are relegated to struggling cohorts, the model's predictions will become a self-fulfilling prophecy.
+### Q3: How could this model fail in real-world usage?
+
+If this model were deployed in a live EdTech company, here are the main ways it could backfire:
+
+1. **Goodhart's Law (Gaming the System):**  
+   If teachers know their bonuses or job security depend on these scores, human behavior will change:
+   - They might make quizzes easier so completion and quiz scores go up.
+   - They might beg or incentivize students to leave 5-star ratings.
+   - They might hesitate to give critical, honest feedback on assignments for fear of getting low ratings in return.
+
+2. **Cohort & Timing Effects:**  
+   Batches running during university exams, summer vacations, or year-end holidays always see lower attendance and higher dropouts. A teacher assigned to a December batch might get flagged as "Low" simply due to bad calendar timing.
+
+3. **Small Sample Noise for New Instructors:**  
+   Even with Bayesian shrinkage, a teacher who has only taught 2 or 3 batches can have their score skewed by a single difficult cohort or a couple of disruptive students.
+
+4. **Self-Fulfilling Loops in Course Allocation:**  
+   If platform managers start giving the "High" instructors the best, most motivated cohorts and give "Low" instructors the struggling batches, the model's predictions will reinforce themselves, making it impossible for developing teachers to improve their metrics.
 
 ---
 
-### Question 4: What additional data would you want to improve this analysis?
-1. **Learner Baseline Attributes:**  
-   Prior academic GPA, prerequisite test scores, employment status, and learning intent (hobbyist vs. career switcher). This allows fitting a **hierarchical value-added model (VAM)** that controls for incoming student ability.
-2. **Qualitative Feedback Text (NLP Sentiment & Thematic Topics):**  
-   Raw 1–5 stars miss nuance. Textual feedback reveals actionable insights (e.g., *"explains concepts clearly"* vs. *"audio was lagging"* or *"slides had typos"*).
-3. **Synchronous vs. Asynchronous Interaction Metrics:**  
-   Live Q&A participation, attendance during live office hours, and average response latency to student questions on message boards.
-4. **Long-Term Downstream Outcomes:**  
-   Subsequent course enrollment, capstone project quality, job placement rates, and alumni NPS 6 months post-graduation.
+### Q4: What additional data would you want to improve this analysis?
+
+If I had access to more data from the platform, I would look for:
+
+1. **Student Background & Prerequisites:**  
+   Incoming student GPA, prior programming experience, or pre-course test scores. That way, we could use a proper Value-Added Model (VAM) to see how much progress a student made relative to their starting point.
+
+2. **Text Feedback (NLP Sentiment & Topics):**  
+   Star ratings are blunt. Natural language comments tell us *why* students were unhappy (e.g., "microphone had static", "slides had errors", or "explained recursion better than anyone else"). That separates platform technical problems from actual teaching issues.
+
+3. **Live Class Telemetry:**  
+   How quickly does the instructor answer questions in the chat? Do they hold office hours? What is their attendance retention during live sessions?
+
+4. **Long-Term Student Outcomes:**  
+   Do students who took this instructor's batch go on to enroll in advanced courses? How do they perform on capstone projects or in job placement interviews?
 
 ---
 
-### Question 5: Should this model be used for instructor performance evaluation? Why or why not?
-**Answer: NO for punitive decisions (firing/compensation cuts); YES for diagnostic enablement and coaching.**
+### Q5: Should this model be used for instructor performance evaluation? Why or why not?
 
-**Ethical & Methodological Justification:**
-1. **Unobserved Confounders:** Observational data cannot isolate an instructor's pure causal impact from cohort motivation, technical platform glitches, and curriculum defects. Firing an instructor based on an observational ML model risks punishing educators who tackle difficult cohorts or rigorous courses.
-2. **Risk of Chilling Academic Rigor:** High-stakes automated evaluation incentivizes grade inflation and spoon-feeding, degrading overall institutional educational standards.
-3. **The Recommended Use Case (Developmental & Diagnostic):**  
-   The model should function as an **early-warning mentorship tool**:
-   - Flag instructors transitioning toward the "Low" tier not to penalize them, but to trigger peer reviews, curriculum audits, and teaching workshops.
-   - Pair "High" tier instructors with "Medium" tier instructors for pedagogical co-teaching and best-practice sharing.
-   - Assist platform operations in balancing teaching loads and identifying systemic course defects."""))
+**Short answer: No for high-stakes punitive decisions (firing or pay cuts); Yes for coaching, mentorship, and operational diagnostics.**
 
-# Save and build notebook
+**Why not punitively?**  
+Observational data shows correlations, not pure causality. As shown above, course difficulty, student demographics, platform outages, and seasonal timing all affect batch numbers, and none of those are under the teacher's direct control. If an EdTech company uses an automated ML score to fire or reprimand instructors, it creates a toxic environment that encourages grade inflation and pushes teachers to avoid challenging courses.
+
+**How it should be used instead:**
+- **Coaching & Early Support:** If an instructor is trending toward the Low tier, academic managers can review lecture recordings, offer teaching workshops, or audit the syllabus to see what's going wrong.
+- **Peer Mentoring:** Pair instructors in the High tier with newer instructors for co-teaching.
+- **Curriculum Health Check:** If every instructor teaching Course X is seeing low completion and low watch time, the problem isn't the instructors — the curriculum itself needs revision."""))
+
+# Save and execute notebook
 nb.cells = cells
 notebook_path = os.path.join(BASE_DIR, "instructor_effectiveness_modeling.ipynb")
 with open(notebook_path, "w", encoding="utf-8") as f:
     nbf.write(nb, f)
 
-print(f"[+] Saved notebook template to {notebook_path}")
+print(f"[+] Saved updated notebook template to {notebook_path}")
 
-# Execute the notebook using nbconvert ExecutePreprocessor so all outputs are generated!
-print("[*] Executing notebook cells to render and capture all outputs...")
+print("[*] Executing notebook cells to render all outputs...")
 ep = ExecutePreprocessor(timeout=600, kernel_name='python3')
 with open(notebook_path, "r", encoding="utf-8") as f:
     nb_to_run = nbf.read(f, as_version=4)
@@ -537,4 +544,4 @@ ep.preprocess(nb_to_run, {'metadata': {'path': BASE_DIR}})
 with open(notebook_path, "w", encoding="utf-8") as f:
     nbf.write(nb_to_run, f)
 
-print(f"[SUCCESS] Notebook successfully executed and saved with all cell outputs: {notebook_path}")
+print(f"[SUCCESS] Notebook successfully re-executed and saved: {notebook_path}")
